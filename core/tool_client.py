@@ -1,33 +1,23 @@
-"""
-tool_client.py — what an individual tool imports to join the container.
-
-Usage pattern for a real tool (e.g. your ONNX solver, a red-team agent, DCS-Net trainer):
-
-    client = ToolClient("solver_v3", capabilities=["solve_arc_task"], uri="ws://localhost:8765")
-    client.on_invoke("solve_arc_task", my_solve_fn)     # my_solve_fn(payload) -> result dict
-    client.on_event("new_task", my_handler)
-    await client.run()   # connects, registers, serves forever
-
-    # elsewhere, to call another tool:
-    result = await client.invoke("red_team_agent", "run_attack", {"target": "..."})
-"""
 import asyncio
 import json
 import uuid
 import logging
+import os
 
 import websockets
 
 log = logging.getLogger("tool_client")
 
+HUB_API_KEY = os.environ.get("HUB_API_KEY", "secret-key")
 
 class ToolClient:
-    def __init__(self, tool_id: str, capabilities: list[str], uri: str = "ws://localhost:8765"):
+    def __init__(self, tool_id: str, capabilities: list[str], schemas: dict = None, uri: str = "ws://localhost:8765"):
         self.id = tool_id
         self.capabilities = capabilities
+        self.schemas = schemas or {}
         self.uri = uri
         self.ws = None
-        self.peers: dict[str, list[str]] = {}
+        self.peers: dict[str, dict] = {}
         self._invoke_handlers: dict[str, callable] = {}
         self._event_handlers: dict[str, callable] = {}
         self._pending: dict[str, asyncio.Future] = {}
@@ -39,24 +29,31 @@ class ToolClient:
     def on_event(self, topic: str, fn):
         self._event_handlers[topic] = fn
 
-    async def connect(self):
+    async def connect(self, api_key: str = HUB_API_KEY):
         self.ws = await websockets.connect(self.uri)
-        await self.ws.send(json.dumps({"type": "register", "id": self.id,
-                                        "capabilities": self.capabilities}))
-        first = json.loads(await self.ws.recv())
+        await self.ws.send(json.dumps({
+            "type": "register",
+            "id": self.id,
+            "capabilities": self.capabilities,
+            "schemas": self.schemas,
+            "api_key": api_key
+        }))
+        raw = await self.ws.recv()
+        first = json.loads(raw)
+        if first["type"] == "error":
+            raise RuntimeError(f"Connection failed: {first.get('message')}")
         assert first["type"] == "registered"
         for p in first["peers"]:
-            self.peers[p["id"]] = p["capabilities"]
-        # background reader — runs regardless of whether this tool ever calls run().
-        # without this, a tool that only calls invoke() (never on_invoke/run) would
-        # have nothing pulling 'result' frames off the socket, and every invoke()
-        # would hang until timeout. (found this empirically on first demo run.)
+            self.peers[p["id"]] = {"capabilities": p["capabilities"], "schemas": p.get("schemas", {})}
         self._recv_task = asyncio.create_task(self._recv_loop())
         return self
 
     async def _recv_loop(self):
-        async for raw in self.ws:
-            await self._handle(json.loads(raw))
+        try:
+            async for raw in self.ws:
+                await self._handle(json.loads(raw))
+        except websockets.ConnectionClosed:
+            pass
 
     async def subscribe(self, topic: str):
         await self.ws.send(json.dumps({"type": "subscribe", "topic": topic}))
@@ -78,7 +75,7 @@ class ToolClient:
     async def _handle(self, msg: dict):
         mtype = msg["type"]
         if mtype == "peer_joined":
-            self.peers[msg["id"]] = msg["capabilities"]
+            self.peers[msg["id"]] = {"capabilities": msg["capabilities"], "schemas": msg.get("schemas", {})}
         elif mtype == "peer_left":
             self.peers.pop(msg["id"], None)
         elif mtype == "invoke":
@@ -109,6 +106,4 @@ class ToolClient:
             log.warning(f"[{self.id}] error: {msg.get('message')}")
 
     async def run(self):
-        """Block forever. The recv loop (started in connect()) does the real work;
-        this just keeps a pure-server tool's coroutine alive."""
         await self._recv_task
