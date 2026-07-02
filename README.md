@@ -23,9 +23,10 @@ This project follows a clean organization of communication layers and a hub-and-
 - **Heartbeats & Health Monitoring**: Automatic cleanup of stale tools and real-time monitoring.
 - **Discovery**: Tools can query the registry to find peers and their capabilities.
 - **API Key Security**: Simple yet effective authentication for the hub.
+- **SCSO-V7 Semantic Routing**: Autonomous router gateway using K-Means clustering and EWMA utility models for intelligent, high-performance tool orchestration.
 
 ## Project Structure
-- `core/`: The central hub and client library.
+- `core/`: The central hub, client library, and SCSO engine.
 - `services/`: Example tools and specialized services.
 - `control/`: Monitoring and management tools.
 
@@ -33,4 +34,5 @@ This project follows a clean organization of communication layers and a hub-and-
 1. Install dependencies: `pip install -r requirements.txt`
 2. Run the hub: `python3 core/hub.py`
 3. Run the monitor: `python3 control/monitor.py`
-4. Run the demo: `python3 demo.py`
+4. Run the standard demo: `python3 demo.py`
+5. Run the SCSO-V7 semantic routing demo: `python3 scso_demo.py`

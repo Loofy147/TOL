@@ -1,2 +1,4 @@
 websockets
 jsonschema
+numpy
+scikit-learn
