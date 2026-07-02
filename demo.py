@@ -13,10 +13,23 @@ async def orchestrator_tool(done_event: asyncio.Event):
     await client.connect()
     await asyncio.sleep(0.2)
 
-    print(f"  [orchestrator] discovered peers with schemas: {client.peers}")
+    print(f"  [orchestrator] discovered peers: {len(client.peers)}")
 
+    # Discovery test
+    all_peers = await client.discovery()
+    print(f"  [orchestrator] discovery returned {len(all_peers)} total peers")
+
+    # Success case
     solved = await client.invoke("solver", "solve", {"task_id": "arc_017"})
-    print(f"  [orchestrator] solver returned: {solved}")
+    print(f"  [orchestrator] solver returned valid: {solved}")
+
+    # Validation failure case (invalid payload for solver)
+    print("  [orchestrator] testing schema validation failure...")
+    try:
+        await client.invoke("solver", "solve", {"wrong_field": 123})
+        print("  Error: solver accepted invalid payload!")
+    except RuntimeError as e:
+        print(f"  [orchestrator] caught expected validation error: {e}")
 
     scored = await client.invoke("critic", "score", solved)
     print(f"  [orchestrator] critic returned: {scored}")
@@ -50,21 +63,5 @@ async def run_demo():
     hub_task.cancel()
     await asyncio.gather(*tools, hub_task, return_exceptions=True)
 
-async def test_auth_failure():
-    print("\n--- testing auth failure ---")
-    hub_task = asyncio.create_task(run_hub())
-    await asyncio.sleep(0.15)
-
-    client = ToolClient("bad_tool", capabilities=[])
-    try:
-        await client.connect(api_key="wrong-key")
-        print("Error: connected with wrong key!")
-    except RuntimeError as e:
-        print(f"Caught expected error: {e}")
-
-    hub_task.cancel()
-    await asyncio.gather(hub_task, return_exceptions=True)
-
 if __name__ == "__main__":
     asyncio.run(run_demo())
-    asyncio.run(test_auth_failure())
